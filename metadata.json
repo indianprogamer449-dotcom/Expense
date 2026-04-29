@@ -1,0 +1,6 @@
+{
+  "name": "Smart Hisaab",
+  "description": "An intelligent expense tracker with category-wise budgeting, visual reports, AI insights, and persistent JSON file storage.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
