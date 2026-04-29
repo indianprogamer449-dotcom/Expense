@@ -24,29 +24,49 @@ import { startOfMonth, addMonths, isBefore, isSameMonth, setDate as setDateInMon
 type Tab = 'overview' | 'transactions' | 'budgets' | 'insights';
 
 export default function App() {
+  const [isLoaded, setIsLoaded] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgets, setBudgets] = useLocalStorage<Budget>('budgets', INITIAL_BUDGETS);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
 
-  // Load transactions from server on mount
+  // Initial Load: Try Server, then fallback to LocalStorage
   useEffect(() => {
-    const loadData = async () => {
+    const loadInitialData = async () => {
       try {
         const res = await fetch('/api/transactions');
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          setTransactions(data);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setTransactions(data);
+            setIsLoaded(true);
+            return;
+          }
         }
       } catch (err) {
-        console.error('Failed to load transactions:', err);
+        console.warn('Backend server not reachable, falling back to local storage:', err);
       }
+
+      // Fallback to LocalStorage
+      const localData = localStorage.getItem('smart-hisaab-transactions');
+      if (localData) {
+        try {
+          setTransactions(JSON.parse(localData));
+        } catch (e) {
+          console.error('Failed to parse local storage data');
+        }
+      }
+      setIsLoaded(true);
     };
-    loadData();
+    loadInitialData();
   }, []);
 
-  // Save transactions to server on change
+  // Save changes to both Server (if exists) and LocalStorage
   useEffect(() => {
-    const saveData = async () => {
+    if (!isLoaded) return;
+
+    localStorage.setItem('smart-hisaab-transactions', JSON.stringify(transactions));
+
+    const persistToServer = async () => {
       try {
         await fetch('/api/transactions', {
           method: 'POST',
@@ -54,15 +74,12 @@ export default function App() {
           body: JSON.stringify(transactions)
         });
       } catch (err) {
-        console.error('Failed to save transactions:', err);
+        // Silent fail for server sync - we already have LocalStorage as primary active copy
       }
     };
     
-    // Simple debouncing or just skip initial empty save if data hasn't loaded yet
-    if (transactions.length > 0) {
-      saveData();
-    }
-  }, [transactions]);
+    persistToServer();
+  }, [transactions, isLoaded]);
 
   const addTransaction = (t: Transaction) => setTransactions([...transactions, t]);
   const deleteTransaction = (id: string) => setTransactions(transactions.filter(t => t.id !== id));
@@ -72,6 +89,8 @@ export default function App() {
   const updateBudget = (cat: string, amount: number) => setBudgets({ ...budgets, [cat]: amount });
 
   useEffect(() => {
+    if (!isLoaded || transactions.length === 0) return;
+
     const processRecurring = () => {
       const now = new Date();
       const newEntries: Transaction[] = [];
@@ -112,10 +131,8 @@ export default function App() {
       }
     };
 
-    if (transactions.length > 0) {
-      processRecurring();
-    }
-  }, []); // Only run on mount
+    processRecurring();
+  }, [isLoaded]); // Run once after initial load completes
 
   const exportToExcel = () => {
     const worksheet = XLSX.utils.json_to_sheet(transactions.map(t => ({
